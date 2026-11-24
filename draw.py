@@ -1,106 +1,78 @@
 #!/usr/bin/env python3
-"""Draw 'The World Today — 24 November 2026': a 1024x1024 newspaper sheet
-summing up Tuesday 24 November 2026 in six illustrated story cards.
+"""Build the 24 November 2026 front page: 'The World Today'.
 
-Reads the six verified illustrations from assets/*.webp, lays them out under
-a masthead and a five-city weather strip, and writes entry.png (PNG, <= 1 MiB).
-Every story was checked against reporting dated 24 November 2026; the weather
-figures are real Open-Meteo forecasts for 24 November 2026.
-Run:  python3 draw.py
+Six verified stories from Tuesday 24 November 2026, each with its own
+generated illustration, set as a newspaper sheet (masthead, weather strip
+with real Open-Meteo figures, 2x3 story grid, source footer) and saved as
+a 1024x1024 PNG under 1 MiB.
+
+Run from the repository root:  python3 draw.py
 """
 import os
-from PIL import Image, ImageDraw, ImageFont
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ASSETS = os.path.join(HERE, "assets")
-OUT = os.path.join(HERE, "entry.png")
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-W = H = 1024
-PAPER = (253, 252, 247)      # warm newsprint
-INK = (18, 18, 18)
-MUTED = (90, 86, 78)
-RULE = (150, 145, 132)
-CHIP_BG = (18, 18, 18)
-CHIP_FG = (253, 252, 247)
-CARD_BG = (255, 255, 255)
-CARD_LINE = (205, 200, 188)
+ROOT = os.path.dirname(os.path.abspath(__file__))
+PHOTO_DIR = os.path.join(ROOT, "assets")
+TARGET = os.path.join(ROOT, "entry.png")
 
-FONT_DIR = "/usr/share/fonts/truetype/dejavu"
+PAGE_W, PAGE_H = 1024, 1024
+MARGIN = 36
+GUTTER = 18
+NEWSPRINT = (253, 252, 247)
+BLACK = (18, 18, 18)
+GREY = (90, 86, 78)
+HAIRLINE = (150, 145, 132)
+CARD_EDGE = (205, 200, 188)
+CARD_FILL = (255, 255, 255)
 
-
-def font(name, size):
-    return ImageFont.truetype(os.path.join(FONT_DIR, name), size)
+DEJAVU = "/usr/share/fonts/truetype/dejavu"
 
 
-F_SERIF_BIG = font("DejaVuSerif-Bold.ttf", 64)
-F_SERIF = font("DejaVuSerif-Bold.ttf", 26)
-F_SANS_B = font("DejaVuSans-Bold.ttf", 21)
-F_SANS = font("DejaVuSans.ttf", 19)
-F_SANS_SM = font("DejaVuSans.ttf", 16)
-F_CHIP = font("DejaVuSans-Bold.ttf", 15)
-F_WEATHER = font("DejaVuSans-Bold.ttf", 17)
-F_WEATHER_SM = font("DejaVuSans.ttf", 15)
-F_FOOT = font("DejaVuSans.ttf", 14)
+def typeface(filename, points):
+    return ImageFont.truetype(os.path.join(DEJAVU, filename), points)
 
 
-def wrap(draw, text, fnt, max_w):
-    """Greedy word wrap returning a list of lines that fit max_w."""
-    lines, cur = [], ""
-    for word in text.split():
-        trial = (cur + " " + word).strip()
-        if draw.textlength(trial, font=fnt) <= max_w:
-            cur = trial
-        else:
-            if cur:
-                lines.append(cur)
-            cur = word
-    if cur:
-        lines.append(cur)
-    return lines
+MASTHEAD_FONT = typeface("DejaVuSerif-Bold.ttf", 64)
+DATE_FONT = typeface("DejaVuSerif-Bold.ttf", 26)
+HEADLINE_FONT = typeface("DejaVuSans-Bold.ttf", 21)
+BODY_FONT = typeface("DejaVuSans.ttf", 19)
+TAG_FONT = typeface("DejaVuSans-Bold.ttf", 15)
+CITY_FONT = typeface("DejaVuSans-Bold.ttf", 17)
+DETAIL_FONT = typeface("DejaVuSans.ttf", 15)
+CREDIT_FONT = typeface("DejaVuSans.ttf", 14)
 
-
-def fit_photo(path, w, h):
-    """Open a photo, centre-crop to w:h, quantise to 256 colours."""
-    img = Image.open(path).convert("RGB")
-    iw, ih = img.size
-    scale = max(w / iw, h / ih)
-    img = img.resize((int(iw * scale + 0.5), int(ih * scale + 0.5)),
-                     Image.LANCZOS)
-    x = (img.width - w) // 2
-    y = (img.height - h) // 2
-    img = img.crop((x, y, x + w, y + h))
-    img = img.convert("P", palette=Image.ADAPTIVE, colors=256).convert("RGB")
-    return img
-
-
+# tag, illustration, headline, deck — all six verified against reporting
+# dated 24 November 2026 (Reuters, CNN, US National Weather Service).
 STORIES = [
-    ("POLAND", "assets/poland.webp",
-     "NATO sends radar jets to Poland after missiles land",
-     "The alliance will deploy an AWACS early-warning aircraft after "
-     "three Russian missiles landed in Poland on Friday."),
-    ("WEATHER", "assets/storms.webp",
-     "Thanksgiving storms threaten both US coasts",
-     "Heavy rain and 50 mph gusts threaten the East Coast into "
-     "Thanksgiving, as an atmospheric river soaks the West."),
-    ("USA", "assets/iowa.webp",
-     "Trump halts Iowa explosives blast",
-     "Trump orders the Army to pause the blast of 68 barrels of "
-     "unstable lead azide in Iowa until a court agrees."),
-    ("GULF", "assets/iran.webp",
-     "Iran vows to defy US naval blockade",
-     "Tehran says it will use every means to counter the blockade "
-     "after Trump threatened to sink ships breaking it."),
-    ("LIBYA", "assets/libya.webp",
-     "Ukraine sinks Russian warship in Libya",
-     "Kyiv says maritime drones sank the corvette Merkury in Benghazi "
-     "port, taking the war far beyond Europe's shores."),
-    ("ASIA", "assets/indonesia.webp",
-     "Indonesia factory fire kills 24",
-     "A blaze at a candy factory in Serang leaves 24 dead and about "
-     "30 missing as rescuers search the wreckage."),
+    dict(tag="POLAND", art="poland.webp",
+         head="NATO sends radar jets to Poland after missiles land",
+         deck="The alliance will deploy an AWACS early-warning aircraft "
+              "after three Russian missiles landed in Poland on Friday."),
+    dict(tag="WEATHER", art="storms.webp",
+         head="Thanksgiving storms threaten both US coasts",
+         deck="Heavy rain and 50 mph gusts threaten the East Coast into "
+              "Thanksgiving, as an atmospheric river soaks the West."),
+    dict(tag="USA", art="iowa.webp",
+         head="Trump halts Iowa explosives blast",
+         deck="Trump orders the Army to pause the blast of 68 barrels of "
+              "unstable lead azide in Iowa until a court agrees."),
+    dict(tag="GULF", art="iran.webp",
+         head="Iran vows to defy US naval blockade",
+         deck="Tehran says it will use every means to counter the "
+              "blockade after Trump threatened to sink ships breaking it."),
+    dict(tag="LIBYA", art="libya.webp",
+         head="Ukraine sinks Russian warship in Libya",
+         deck="Kyiv says maritime drones sank the corvette Merkury in "
+              "Benghazi port, taking the war far beyond Europe's shores."),
+    dict(tag="ASIA", art="indonesia.webp",
+         head="Indonesia factory fire kills 24",
+         deck="A blaze at a candy factory in Serang leaves 24 dead and "
+              "about 30 missing as rescuers search the wreckage."),
 ]
 
-WEATHER = [
+# Real Open-Meteo daily forecast for 24 November 2026: high/low, sky, wind.
+FORECAST = [
     ("Warsaw", "4° / 1°", "light snow", "24 km/h"),
     ("Tehran", "22° / 9°", "overcast", "10 km/h"),
     ("Benghazi", "22° / 18°", "partly cloudy", "20 km/h"),
@@ -108,88 +80,119 @@ WEATHER = [
     ("Des Moines", "2° / -3°", "overcast", "10 km/h"),
 ]
 
-FOOT = ("Sources: Reuters, CNN, US National Weather Service  •  Weather: "
-        "Open-Meteo  •  Illustrations generated for this entry")
+CREDITS = ("Sources: Reuters, CNN, US National Weather Service  •  "
+           "Weather: Open-Meteo  •  Illustrations generated for this entry")
 
 
-def main():
-    sheet = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(sheet)
-    mx = 36                      # side margin
-    cx = W - 2 * mx              # content width
+def load_photo(name, width, height):
+    """Centre-crop an illustration to the card photo slot, 256 colours."""
+    shot = Image.open(os.path.join(PHOTO_DIR, name)).convert("RGB")
+    shot = ImageOps.fit(shot, (width, height), Image.LANCZOS)
+    return shot.convert("P", palette=Image.ADAPTIVE, colors=256).convert("RGB")
 
-    # --- masthead ------------------------------------------------------
+
+def centred(draw, text, y, typeface_, colour):
+    x = (PAGE_W - draw.textlength(text, font=typeface_)) / 2
+    draw.text((x, y), text, font=typeface_, fill=colour)
+    return y + typeface_.size
+
+
+def draw_masthead(canvas, draw):
     y = 30
-    title = "THE WORLD TODAY"
-    d.text(((W - d.textlength(title, font=F_SERIF_BIG)) / 2, y),
-           title, font=F_SERIF_BIG, fill=INK)
+    centred(draw, "THE WORLD TODAY", y, MASTHEAD_FONT, BLACK)
     y += 78
-    date = "Tuesday, 24 November 2026"
-    d.text(((W - d.textlength(date, font=F_SERIF)) / 2, y),
-           date, font=F_SERIF, fill=MUTED)
+    centred(draw, "Tuesday, 24 November 2026", y, DATE_FONT, GREY)
     y += 40
-    d.line([(mx, y), (W - mx, y)], fill=RULE, width=2)
-    y += 12
+    draw.line([(MARGIN, y), (PAGE_W - MARGIN, y)], fill=HAIRLINE, width=2)
+    return y + 12
 
-    # --- weather strip -------------------------------------------------
-    cell_w = cx // 5
-    for i, (city, temp, cond, wind) in enumerate(WEATHER):
-        x0 = mx + i * cell_w
-        d.text((x0 + 4, y), city, font=F_WEATHER, fill=INK)
-        d.text((x0 + 4, y + 22), temp, font=F_WEATHER_SM, fill=MUTED)
-        d.text((x0 + 4, y + 42), f"{cond} · {wind}",
-               font=F_WEATHER_SM, fill=MUTED)
-        if i:
-            d.line([(x0 - 6, y + 2), (x0 - 6, y + 58)], fill=RULE, width=1)
-    y += 66
-    d.line([(mx, y), (W - mx, y)], fill=RULE, width=2)
-    y += 14
 
-    # --- story grid: 2 columns x 3 rows -------------------------------
-    gap = 18
-    card_w = (cx - gap) // 2
-    foot_h = 34
-    grid_top = y
-    grid_h = H - 30 - foot_h - grid_top
-    card_h = (grid_h - 2 * gap) // 3
+def draw_weather(canvas, draw, top):
+    span = PAGE_W - 2 * MARGIN
+    cell = span // len(FORECAST)
+    for index, (city, temps, sky, wind) in enumerate(FORECAST):
+        left = MARGIN + index * cell
+        draw.text((left + 4, top), city, font=CITY_FONT, fill=BLACK)
+        draw.text((left + 4, top + 22), temps, font=DETAIL_FONT, fill=GREY)
+        draw.text((left + 4, top + 42), f"{sky} · {wind}",
+                  font=DETAIL_FONT, fill=GREY)
+        if index:
+            draw.line([(left - 6, top + 2), (left - 6, top + 58)],
+                      fill=HAIRLINE, width=1)
+    bottom = top + 66
+    draw.line([(MARGIN, bottom), (PAGE_W - MARGIN, bottom)],
+              fill=HAIRLINE, width=2)
+    return bottom + 14
+
+
+def draw_card(canvas, draw, story, x0, y0, width, height):
+    draw.rectangle([x0, y0, x0 + width, y0 + height],
+                   fill=CARD_FILL, outline=CARD_EDGE, width=1)
     photo_h = 96
+    canvas.paste(load_photo(story["art"], width, photo_h), (x0, y0))
+    label = story["tag"]
+    chip_w = draw.textlength(label, font=TAG_FONT) + 18
+    chip_top = y0 + photo_h - 30
+    draw.rectangle([x0 + 8, chip_top, x0 + 8 + chip_w, chip_top + 22],
+                   fill=BLACK)
+    draw.text((x0 + 17, chip_top + 3), label, font=TAG_FONT,
+              fill=NEWSPRINT)
     pad = 12
+    text_x = x0 + pad
+    text_w = width - 2 * pad
+    cursor = y0 + photo_h + 8
+    # Headline: wrap by pixel width using textwrap on a measured basis.
+    head_lines = wrap_by_width(draw, story["head"], HEADLINE_FONT, text_w)
+    for line in head_lines[:2]:
+        draw.text((text_x, cursor), line, font=HEADLINE_FONT, fill=BLACK)
+        cursor += 24
+    cursor += 2
+    deck_lines = wrap_by_width(draw, story["deck"], BODY_FONT, text_w)
+    for line in deck_lines[:3]:
+        draw.text((text_x, cursor), line, font=BODY_FONT, fill=GREY)
+        cursor += 21
 
-    for idx, (tag, asset, headline, body) in enumerate(STORIES):
-        row, col = divmod(idx, 2)
-        x0 = mx + col * (card_w + gap)
-        y0 = grid_top + row * (card_h + gap)
 
-        d.rectangle([x0, y0, x0 + card_w, y0 + card_h],
-                    fill=CARD_BG, outline=CARD_LINE, width=1)
-        photo = fit_photo(os.path.join(HERE, asset), card_w, photo_h)
-        sheet.paste(photo, (x0, y0))
-        # tag chip over the photo's bottom-left corner
-        chip_w = d.textlength(tag, font=F_CHIP) + 18
-        chip_y = y0 + photo_h - 30
-        d.rectangle([x0 + 8, chip_y, x0 + 8 + chip_w, chip_y + 22],
-                    fill=CHIP_BG)
-        d.text((x0 + 17, chip_y + 3), tag, font=F_CHIP, fill=CHIP_FG)
+def wrap_by_width(draw, text, typeface_, max_width):
+    """Split text into lines no wider than max_width pixels."""
+    words = text.split()
+    lines, current = [], ""
+    for word in words:
+        trial = f"{current} {word}".strip()
+        if draw.textlength(trial, font=typeface_) <= max_width:
+            current = trial
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
 
-        tx = x0 + pad
-        ty = y0 + photo_h + 8
-        text_w = card_w - 2 * pad
-        for line in wrap(d, headline, F_SANS_B, text_w)[:2]:
-            d.text((tx, ty), line, font=F_SANS_B, fill=INK)
-            ty += 24
-        ty += 2
-        for line in wrap(d, body, F_SANS, text_w)[:3]:
-            d.text((tx, ty), line, font=F_SANS, fill=MUTED)
-            ty += 21
 
-    # --- footer --------------------------------------------------------
-    fy = H - 30 - 14
-    d.line([(mx, fy), (W - mx, fy)], fill=RULE, width=1)
-    d.text((mx, fy + 8), FOOT, font=F_FOOT, fill=MUTED)
+def draw_footer(draw, top):
+    draw.line([(MARGIN, top), (PAGE_W - MARGIN, top)], fill=HAIRLINE, width=1)
+    draw.text((MARGIN, top + 8), CREDITS, font=CREDIT_FONT, fill=GREY)
 
-    sheet.save(OUT, "PNG", optimize=True)
-    print(f"wrote {OUT}: {os.path.getsize(OUT)} bytes")
+
+def build_sheet():
+    sheet = Image.new("RGB", (PAGE_W, PAGE_H), NEWSPRINT)
+    draw = ImageDraw.Draw(sheet)
+    y = draw_masthead(sheet, draw)
+    y = draw_weather(sheet, draw, y)
+    grid_top = y
+    grid_bottom = PAGE_H - 30 - 34
+    card_w = (PAGE_W - 2 * MARGIN - GUTTER) // 2
+    card_h = (grid_bottom - grid_top - 2 * GUTTER) // 3
+    for position, story in enumerate(STORIES):
+        row, col = divmod(position, 2)
+        x0 = MARGIN + col * (card_w + GUTTER)
+        y0 = grid_top + row * (card_h + GUTTER)
+        draw_card(sheet, draw, story, x0, y0, card_w, card_h)
+    draw_footer(draw, PAGE_H - 30 - 14)
+    sheet.save(TARGET, "PNG", optimize=True)
+    print(f"wrote {TARGET}: {os.path.getsize(TARGET)} bytes")
 
 
 if __name__ == "__main__":
-    main()
+    build_sheet()
